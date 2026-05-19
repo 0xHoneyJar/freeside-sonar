@@ -1539,7 +1539,7 @@ flatline_protocol:
     # Secondary model (default: GPT-5.3-Codex)
     secondary: "gpt-5.3-codex"
     # Tertiary model (3-model cross-scoring)
-    tertiary: "gemini-3.1-pro-preview"
+    tertiary: "gemini-3.1-pro"
 
   # Consensus thresholds (0-1000 scale)
   thresholds:
