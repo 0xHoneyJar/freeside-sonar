@@ -1,249 +1,317 @@
-# PRD: Community Feedback — Review Pipeline Hardening
+# Cycle-112 PRD — Empirical Model Economy (Phase A)
 
-**Cycle**: cycle-048
-**Created**: 2026-02-28
-**Sources**: Issues #425, #426, #427, #430 (community feedback from zkSoju, gumibera)
-**Flatline Review**: Passed — 8 HIGH_CONSENSUS findings integrated, 0 BLOCKERS
+> **Version**: 1.0
+> **Source issue**: [#925](https://github.com/0xHoneyJar/loa/issues/925) — `feat(empirical-model-selection): Phase A — model-economy roll-up + workload tier map seed`
+> **Cycle**: cycle-112-empirical-model-economy
+> **Phase of roadmap**: A of 3 (Activate → Codify → Optimize)
+> **Generated**: 2026-05-17 via `/plan` golden-path → `/plan-and-analyze`
+> **Discovery shortcut taken**: #925 body is proposal-grade. Skipped greenfield 7-phase interview; relied on issue body + brownfield codebase reality (cycle-109 substrate-hardening artifacts) + memory citations.
+
+---
 
 ## 1. Problem Statement
 
-The Loa review pipeline has several reliability gaps discovered during real-world usage across loa-constructs (v2.8.0), loa-finn, loa-hounfour, loa-freeside, and loa-dixie. These range from parsing failures that block the review loop (#427.1), to stale state propagation that silently skips quality gates (#430), to a YAML parser bug that disables the Bridgebuilder (#425). Each individually causes friction; together they undermine confidence in the review pipeline as a whole.
+The cost dimension of model dispatch is currently invisible to operators. All the raw telemetry exists — `MODELINV v1.3` envelopes at `.run/model-invoke.jsonl`, `verdict_quality` envelopes attached to every substrate output, `cost_input`/`cost_output` per model in `model-config.yaml` — but no consolidated view turns that telemetry into a decision-grade roll-up. Tier-selection decisions (e.g., "should `/implement` run on executor tier?", "should `/audit-sprint` stay on advisor?") are currently made on operator intuition + scattered memory notes, not on empirical roll-up data.
 
-> Sources: #427 (zkSoju, loa-constructs cycle-036), #426 (zkSoju), #425 (zkSoju), #430 (gumibera, simstim cycle-018)
+> Source: #925 body, "Context" section
+>
+> > "The *cost* side is currently invisible. We have all the raw signal (`MODELINV v1.3` envelopes at `.run/model-invoke.jsonl`, `verdict_quality` on every substrate output, `cost_input`/`cost_output` per model in `model-config.yaml`) but no consolidated view. Decisions like 'should /implement use executor tier?' or 'should /audit-sprint stay on advisor tier?' are made on operator intuition + scattered memory notes, not on empirical roll-up data."
 
-## 2. Goals & Success Criteria
+The quality dimension was the focus of cycle-109 (substrate hardening, closed); the cost dimension is what cycle-112 makes legible.
 
-| Goal | Metric | Source |
-|------|--------|--------|
-| GPT review loop completes without false-negative exit codes | All verdict check sites handle both `.verdict` and `.overall_verdict` | #427.1 |
-| Bridgebuilder config parsing works regardless of YAML section ordering | Regex uses `[ \t]+` not `\s+` for section capture | #425 |
-| Flatline readiness validated fresh per cycle | `flatline-readiness.sh` checks all configured providers (incl. Gemini) | #430 |
-| 401 errors surface actual API error message | `lib-curl-fallback.sh` extracts `.error.message` from response body | #426 |
-| Cross-platform `timeout` usage documented and portable | Canonical `run_with_timeout()` in compat-lib.sh, existing ad-hoc implementations migrated | #427.2 |
-| Curl config injection guard standardized | API key validated before writing curl config; all existing sites migrated | #427.4 |
+### Why now
 
-## 3. User Context
+Two prerequisites converged in the days before cycle-112 kickoff:
 
-**Primary persona**: Loa operator running multi-model review pipelines (simstim, run-bridge, gpt-review) across macOS and Linux.
+1. **Substrate quality validated** (cycle-111 / today). PR #923 + #924 closed KF-010 empirically — the BB triad now runs 3/3-voice consensus on previously-failing PRs. The substrate is stable enough that cost-vs-quality tradeoffs can be measured without the measurement being confounded by primary failures.
+2. **Primary-failure visibility shipped** (this session, [PR #926](https://github.com/0xHoneyJar/loa/pull/926), closes #900). Without #900's fix, fallback-rescue success silently overwrote primary-failure signal, so any cost-per-clean-output roll-up would have produced inflated quality numbers. With #900 closed, `attempts` vs `first_try_success` give the roll-up a clean foundation.
 
-**Pain points** (from feedback):
-- "Agent carried stale skip decisions without verification" (#430)
-- "Useful approvals that the parser rejected" (#427.1)
-- "Observe 'disabled' error despite `enabled: true` being set" (#425)
-- "Had to curl API directly to see 'Incorrect API key' error" (#426)
+> Source: today's session handoff context + #925 "Dependencies" section
+>
+> > "Depends on (soft — preferable but not strict): #900 — substrate-health hides primary failures after fallback success. Without #900, roll-up data is confounded by silent fallback-promotion … The roll-up will work without #900 but with a known accuracy caveat documented in the runbook."
+
+Cycle-112 lands AFTER #900 merged, so the caveat is no longer needed.
+
+### Three-phase roadmap context
+
+This cycle ships **Phase A only**:
+
+| Phase | Goal | This cycle |
+|---|---|---|
+| **A — Activate what exists** | Make existing telemetry visible and usable | **YES** |
+| B — Codify the tier mapping | Skills consume `workload_tier_map`; per-skill cost ceilings | Future |
+| C — Closed-loop optimization | Auto-demotion proposals, auto-promotion on degradation, regression detector | Future |
+
+> Source: #925 body, "Context" section (phase table verbatim)
+
+Phase B+C are explicitly out of scope and have separate proposal issues (see §6).
+
+---
+
+## 2. Goals & Success Metrics
+
+### Goal G-1 (primary): Operator-readable cost roll-up
+
+Operators can run a single command and see the last 30d of model-dispatch activity broken down by `(skill, model)` with `cost-per-clean-output`, `p95 latency`, and `verdict_quality` distribution.
+
+**Success metric**: An operator who has been away from the project for a week can run `/loa status --economy` and within 30 seconds identify (a) the most expensive skill+model combination, (b) any skill where verdict_quality_healthy_pct < 90%, (c) any model with p95 latency > some configurable threshold.
+
+### Goal G-2: Calibration capture
+
+The empirical calibrations currently living in operator memory (e.g., "executor tier UNSAFE for BB review", "advisor tier required for review+audit") are codified in a `workload_tier_map` in `.loa.config.yaml` with provenance references.
+
+**Success metric**: Every entry in `workload_tier_map` either (a) cites a specific memory file or PR-comment trail, or (b) is annotated as "default, no empirical override". A `grep -c "Tier-Change-Evidence:" .loa.config.yaml` returns ≥ 1 (at least one calibration from memory is captured).
+
+### Goal G-3: Drift protection
+
+Future tier-map changes require empirical justification or an operator-approval marker. The CI gate rejects synthetic PRs that mutate the map without a `Tier-Change-Evidence:` trailer or operator-approval marker.
+
+**Success metric**: A synthetic PR that edits `workload_tier_map` without a `Tier-Change-Evidence:` trailer fails CI with an actionable error message pointing to the runbook.
+
+### Goal G-4: Zero behavior regression
+
+Existing model dispatch behavior is unchanged this cycle. The map is *informational*. Phase B (consumption) is a separate cycle.
+
+**Success metric**: After this cycle ships, every existing skill that dispatches a model produces the same model choice it did before the cycle. Verified by a smoke test that diffs the dispatch choice for a fixed input across pre-cycle and post-cycle `main`.
+
+### Timeline
+
+Single sprint, scope-defined by issue body's 5 deliverables. No external dependencies beyond the existing `MODELINV v1.3` envelope schema (shipped in cycle-109).
+
+---
+
+## 3. User & Stakeholder Context
+
+### Primary user: Loa operator (single persona)
+
+- @janitooor (deep-name) and any agent-swarm operator running Loa in autonomous or interactive mode.
+- Reads CLI output, edits `.loa.config.yaml`, reviews PRs from autonomous runs.
+- Cares about cost-vs-quality tradeoffs across long-running agent swarms — these add up to real spend over weeks of autonomous operation.
+- Does NOT want a Grafana dashboard or external observability surface (explicit out-of-scope in #925).
+
+> Source: #925 body, "Out of scope" section
+>
+> > "Cost dashboards / external observability — the goal is in-tree CLI visibility, not Grafana boards"
+
+### Secondary stakeholder: future-self / cross-session memory
+
+The cost roll-up and the `workload_tier_map` both serve as memory: a future session can `cat .loa.config.yaml` and learn "advisor tier is required for /audit-sprint because of empirical evidence on PR #885 A/B". Today this lives in memory files (`feedback_advisor_benchmark.md`). After this cycle, it lives in tracked config with provenance.
+
+---
 
 ## 4. Functional Requirements
 
-### FR-1: GPT Verdict Parsing Resilience (#427.1)
+### FR-1: `tools/model-economy-roll-up.sh`
 
-**Problem**: The review pipeline checks `.verdict` in multiple locations across the codebase. GPT 5.3-codex returns `.overall_verdict` on re-review iterations, causing exit code 5 (format error). The PRD originally identified only `gpt-review-api.sh` lines 116 and 131, but Flatline review found `.verdict`-only checks in at least 7 locations across 4+ files.
+A bash CLI consolidates `.run/model-invoke.jsonl` (and any older-format MODELINV logs we want to absorb) into a tabular roll-up.
 
-**Affected files** (Flatline-identified):
-- `gpt-review-api.sh` lines 116, 131 — legacy codex path
-- `lib-curl-fallback.sh` line 318 — terminal verdict validation in `call_api()`
-- `lib-route-table.sh` lines 202, 581 — declarative route table validation
-- `lib/normalize-json.sh` line 250 — `validate_agent_response()` schema check
-- Existing BATS tests in `test-gpt-review-integration.bats` — `.verdict`-only assertions
+**Behavior**:
+- One row per `(skill, model, cost-per-clean-output, p95-latency, verdict_quality-distribution)` tuple
+- Default time window: 30 days (configurable via `--window 30d`, parses same way `loa_cheval.health` does)
+- Output modes: text (human-readable table) and `--json` (machine-readable for `/loa status --economy` consumption)
+- Filtering: `--skill <name>` and `--model <id>` (substring match, same semantics as today's `loa_cheval.health --model X`, gated per #900 fix)
+- Reads `cost_input` / `cost_output` per model from `model-config.yaml` and joins against MODELINV `tokens_input` / `tokens_output` to compute cost-per-invocation
+- "Clean output" = `verdict_quality.status == "APPROVED"` AND `chain_health == "ok"`; cost-per-clean-output divides total cost by clean-invocation count
+- Skill attribution: read from MODELINV envelope's `phase` / `skill` field (cycle-109 added the phase field; verify schema)
 
-**Fix**:
-- Create centralized `extract_verdict()` helper in `lib/normalize-json.sh`: `jq -r '.verdict // .overall_verdict // "UNKNOWN"'`
-- Apply normalization early in the response pipeline (before any validation)
-- Update all call sites to use the centralized helper
-- Update existing test assertions to use the normalized pattern
+> Source: #925 body, Deliverable 1 (verbatim)
 
-**Acceptance criteria**:
-- GPT review completes when response contains `.overall_verdict` instead of `.verdict`
-- Existing `.verdict` responses continue to work unchanged
-- All verdict check sites (7+) use centralized `extract_verdict()`
-- BATS test covers both field names through the `call_api()`, `validate_review_result()`, and `validate_agent_response()` paths
-- Existing `test-gpt-review-integration.bats` assertions updated
+**EARS notation** (high-precision because this is the load-bearing computation):
 
-**Implementation order**: Implement AFTER FR-4 (both modify `lib-curl-fallback.sh`)
+- **Ubiquitous**: The roll-up tool shall compute `cost_per_clean_output` as `(total_cost_usd / count_of_envelopes_where_verdict_quality.status == "APPROVED" AND chain_health == "ok")` for each `(skill, model)` tuple over the window.
+- **Conditional**: If an MODELINV envelope is missing a `skill` / `phase` attribution field, the tool shall bucket it under `(unknown)` rather than skip it, so total cost is conserved.
+- **Event-driven**: When invoked with `--json`, the tool shall emit a JSON document that conforms to a published schema at `.claude/data/model-economy-rollup.schema.json` (delivered with this sprint).
 
-### FR-2: Bridgebuilder YAML Parser Fix (#425)
+### FR-2: `/loa status --economy`
 
-**Problem**: `config.ts` line 189 regex `/^bridgebuilder:\s*\n((?:\s+.+\n?)*)/m` uses `\s+` which matches newlines, causing capture to bleed through all subsequent YAML sections. Last `enabled: false` from any later section overwrites bridgebuilder's `enabled: true`.
+The `/loa` golden-path command gains an `--economy` flag that surfaces the FR-1 roll-up.
 
-**Context** (Flatline-clarified): The upstream Loa repo's `.loa.config.yaml` has no top-level `bridgebuilder:` section — it has `bridgebuilder_design_review:` and `run_bridge.bridgebuilder:`. The bug manifests in downstream repos (loa-constructs, loa-finn, etc.) that DO have standalone `bridgebuilder:` sections. The regex's `^` in multiline mode matches any line start, so it could also false-match `bridgebuilder_design_review:` as a prefix. The existing `config.test.ts` tests bypass `loadYamlConfig()` entirely (passing yamlConfig directly to `resolveConfig()`), so they don't exercise the regex.
+**Behavior**:
+- Default window: 30d
+- Default output: text table
+- Suggested format (from #925 body):
+  ```
+  Skill              Model                   Runs   Cost/run    p95 latency   VQ-healthy %
+  /implement         claude-sonnet-4-6       42     $0.18       42s           98%
+  /review-sprint     claude-opus-4-7         15     $1.20       190s          93%
+  /audit-sprint      gpt-5.5-pro             15     $0.95       240s          87%   ⚠ degraded twice
+  ```
+- Degradation marker (the `⚠ degraded twice` suffix) fires when ≥ 2 envelopes in the window had `verdict_quality.status` ∈ {DEGRADED, FAILED} for that `(skill, model)` tuple
+- Implementation: shells out to `tools/model-economy-roll-up.sh` (the CLI is the canonical implementation; `/loa status --economy` is a thin wrapper that runs `--json` and pretty-prints)
 
-**Fix**:
-- Replace `\s+` with `[ \t]+` in the inner capture group
-- Updated regex: `/^bridgebuilder:\s*\n((?:[ \t]+.+\n?)*)/m`
-- Verify regex does NOT match `bridgebuilder_design_review:` (prefix false positive)
-- Rebuild TypeScript → dist/
+### FR-3: Seeded `workload_tier_map` in `.loa.config.yaml`
 
-**Acceptance criteria**:
-- Bridgebuilder reads `enabled: true` correctly regardless of section ordering in `.loa.config.yaml`
-- Existing config.test.ts passes
-- New test exercises `loadYamlConfig()` directly (not just `resolveConfig()` with injected config)
-- New test: config with `bridgebuilder:` before `red_team:` (which has `enabled: false`) parses correctly
-- New test: config with `bridgebuilder_design_review:` is NOT captured by `bridgebuilder:` regex
-- Built dist/ output committed and matches TypeScript source (`npm run build && git diff --exit-code dist/`)
+A new top-level config section `workload_tier_map` maps `(skill_name) → {tier, rationale, evidence_ref}`.
 
-### FR-3: Flatline Readiness — 3-Model Validation (#430)
+**Behavior**:
+- Skills covered: every skill that currently dispatches a model (identified by `grep "model-adapter\|cheval" .claude/skills/` per #925 AC)
+- Tiers (initial vocabulary): `advisor` (highest quality, e.g. Opus 4.7 / GPT-5.5-pro / Gemini-3.1-pro), `executor` (efficient, e.g. Sonnet 4.6 / Haiku 4.5), `headless` (CI-tier, e.g. codex-headless / claude-headless)
+- Schema: each entry has `tier`, `rationale` (free text), `evidence_ref` (a memory filename or PR URL or "default")
+- Seeded entries (from operator memory + this session's adversarial-review experience):
+  - `/review-sprint`: `advisor` — rationale "executor tier missed 1 HC + 60% fewer findings on PR #885 A/B"; evidence_ref `feedback_advisor_benchmark.md`
+  - `/audit-sprint`: `advisor` — same rationale; evidence_ref `feedback_advisor_benchmark.md`
+  - `bridgebuilder-review`: `advisor` — rationale "BB needs cross-model dissent diversity; executor tier degrades to single-model"; evidence_ref `feedback_advisor_benchmark.md`
+  - `adversarial-review`: `advisor` — rationale "dissenter needs to catch reviewer blind spots; quality floor non-negotiable"; evidence_ref `feedback_advisor_benchmark.md`
+- Default (no empirical override) entries are still written, marked `evidence_ref: default` — this makes the map exhaustive over the skill surface and prevents "silent absence == default" ambiguity
 
-**Problem**: Simstim Phase 0 doesn't validate Flatline readiness. Agents inherit stale skip decisions from previous cycles. PR #431 adds a readiness check but only validates 2 of 3 configured providers.
+> Source: #925 body, Deliverable 3 (and ACs)
+> Source: memory `feedback_advisor_benchmark.md` (executor unsafe for BB review)
+> Source: today's session adversarial-review run on PR #885 (referenced in memory note 2026-05-16 evening)
 
-**This is a NEW FILE** (Flatline-clarified): `flatline-readiness.sh` does not exist in the repository. This is greenfield implementation, not a patch. Scope estimation should account for writing the full script from scratch.
+### FR-4: CI drift gate
 
-**Fix** (supersedes PR #431):
-- Create `.claude/scripts/flatline-readiness.sh` (new file)
-- Reads configured models from `.loa.config.yaml` (primary, secondary, tertiary)
-- Maps models to API key env vars:
-  - `opus` / `claude-*` → `ANTHROPIC_API_KEY`
-  - `gpt-*` → `OPENAI_API_KEY`
-  - `gemini-*` → `GOOGLE_API_KEY` (canonical) with `GEMINI_API_KEY` as accepted alias + deprecation warning
-- Reports status based on provider availability:
-  - `READY` (exit 0): All configured provider keys present
-  - `DISABLED` (exit 1): `flatline_protocol.enabled` is false or absent
-  - `NO_API_KEYS` (exit 2): Zero provider keys present
-  - `DEGRADED` (exit 3): 1+ but not all provider keys present
-- Integration into `simstim-orchestrator.sh` preflight (from PR #431)
-- SKILL.md updated with fresh-per-cycle validation warning
-- Mirrors `beads-health.sh` pattern (same exit codes, flags, PROJECT_ROOT override)
+A GitHub Actions workflow rejects PRs that mutate `.loa.config.yaml::workload_tier_map` without providing empirical justification.
 
-**Output schema** (`--json`):
-```json
-{
-  "status": "READY|DEGRADED|NO_API_KEYS|DISABLED",
-  "providers": {
-    "anthropic": { "configured": true, "available": true },
-    "openai": { "configured": true, "available": true },
-    "google": { "configured": true, "available": true, "env_var": "GOOGLE_API_KEY" }
-  },
-  "recommendations": ["..."]
-}
-```
+**Behavior**:
+- Trigger: `pull_request` events that touch `.loa.config.yaml`
+- Logic: if the PR diff contains changes to lines within the `workload_tier_map` section, the PR body must contain EITHER:
+  1. A `Tier-Change-Evidence:` trailer followed by a roll-up table (markdown) showing N HEALTHY verdict_quality runs at the new tier, OR
+  2. An `Operator-Approval:` trailer with a deep-name signature (same pattern as cycle-108 baseline-pin drift gate per #925)
+- Failure mode: actionable error message pointing to `grimoires/loa/runbooks/model-economy.md` "How to justify a tier change" section
+- Same architectural pattern as the cycle-108 baseline-pin drift gate (referenced in #925 verbatim)
 
-**Acceptance criteria**:
-- `flatline-readiness.sh --json` reports correct status for all provider combinations
-- Gemini availability checked when `flatline_protocol.models.tertiary` is configured
-- Both `GOOGLE_API_KEY` and `GEMINI_API_KEY` accepted; `GEMINI_API_KEY` triggers deprecation warning
-- `tests/unit/flatline-readiness.bats` covers READY, DEGRADED, NO_API_KEYS, DISABLED
-- Simstim preflight logs Flatline status to trajectory
+> Source: #925 body, Deliverable 4 (verbatim)
 
-### FR-4: API Error Message Surfacing (#426)
+### FR-5: Operator runbook at `grimoires/loa/runbooks/model-economy.md`
 
-**Problem**: `lib-curl-fallback.sh` 401 handler (lines 255-257) prints generic "Authentication failed" for 401 errors. The actual API error message (e.g., "Incorrect API key provided") is discarded.
+A standalone runbook covering five operator-facing sections:
 
-**Fix**:
-- Extract `.error.message` from response body via `jq -r '.error.message // empty' 2>/dev/null`
-- Pass extracted message through `redact_secrets()` before display (prevents API key fragment leakage)
-- Show both: specific error first, generic fallback second
-- Handle non-JSON error bodies gracefully (HTML from proxies/CDNs, empty bodies, JSON without `.error` key)
+1. **How to read the roll-up** — column meanings, how to interpret cost-per-clean-output, when "degraded twice" warrants action
+2. **When to consider a tier change** — quality floors per skill (defer to operating principles), what signals justify investigating a demotion (e.g., 30+ HEALTHY runs at current tier with stable verdict_quality)
+3. **How to justify a tier change in a PR body** — exact format of `Tier-Change-Evidence:` trailer, what counts as evidence, when `Operator-Approval:` is the right path instead
+4. **What triggers the drift gate** — which lines, why, and how to avoid surprise failures
+5. **Operating principles** — the five from #925 body, verbatim, codified so future operators don't have to rediscover them
 
-**Note**: `.env` sourcing is intentionally NOT supported (SKP-003 security decision — env-only auth prevents credential file exposure). This is documented behavior, not a bug.
+> Source: #925 body, Deliverable 5 (verbatim)
+> Source: #925 body, "Operating principles" section (verbatim)
 
-**Scope note**: This FR covers the direct curl path in `call_api()` only. The model-invoke path (`call_api_via_model_invoke()`) also swallows errors but is a separate concern for a future cycle.
+---
 
-**Acceptance criteria**:
-- 401 responses show the API provider's error message (after secret redaction)
-- Non-JSON error bodies (HTML, empty, malformed) fall back gracefully to generic message
-- Error messages passed through `redact_secrets()` before display
-- BATS test verifies error extraction for: valid JSON error, HTML body, empty body, JSON without `.error`
+## 5. Technical & Non-Functional Requirements
 
-**Implementation order**: Implement BEFORE FR-1 (both modify `lib-curl-fallback.sh`)
+### NFR-Perf-1: Roll-up speed
 
-### FR-5: Cross-Platform `timeout` Helper (#427.2)
+`tools/model-economy-roll-up.sh` must complete in < 5 seconds for a 30d window over a 100K-entry `.run/model-invoke.jsonl`. Same bar as cycle-109's `aggregate_substrate_health` (NFR-Perf-3 there is < 2s for 24h / 100K — we're 7× the window so 5s is conservative).
 
-**Problem**: `timeout` command doesn't exist on stock macOS. Scripts use ad-hoc fallback chains. At least 2 incompatible `run_with_timeout()` implementations already exist (`post-pr-orchestrator.sh` line 105, `post-pr-e2e.sh` line 103), plus a bare `timeout` call in `golden-path.sh` line 403.
+### NFR-Sec-1: No secret leakage
 
-**Fix**:
-- Add canonical `run_with_timeout()` to `.claude/scripts/compat-lib.sh`
-- Fallback chain: `timeout` → `gtimeout` → `perl -e 'alarm(N); exec @ARGV'` → warn and run without timeout
-- Runtime detection (not cached at source time) to support test PATH manipulation
-- Migrate existing implementations:
-  - `post-pr-orchestrator.sh` line 105 → use `compat-lib.sh` helper
-  - `post-pr-e2e.sh` line 103 → use `compat-lib.sh` helper (preserve security allowlist logic separately)
-  - `golden-path.sh` line 403 → use `compat-lib.sh` helper
-- Document in `.claude/protocols/cross-platform-shell.md`
-- CI lint (`shell-compat-lint.yml`) should flag bare `timeout` usage
+The roll-up consumes MODELINV envelopes. MODELINV payloads have already been sanitized through `lib/log-redactor` (cycle-099 T1.13). The roll-up tool MUST NOT introduce new paths that bypass redactor — specifically, it must NOT print `models_failed[].message_redacted` content or any other free-text envelope field that could carry secret-shape strings. Display surface is restricted to model IDs, skill names, integer counts, latency stats, cost numbers, and verdict_quality enum values.
 
-**Acceptance criteria**:
-- `run_with_timeout 10 sleep 20` terminates after 10s on both macOS and Linux
-- Function exists in compat-lib.sh with runtime detection (not cached)
-- Existing ad-hoc implementations (3 sites) migrated to canonical helper
-- BATS test covers all fallback paths using PATH manipulation to simulate each scenario
-- CI lint rule flags bare `timeout` command usage
-- Protocol doc updated
+### NFR-Quality-1: Quality floor preservation
 
-### FR-6: Curl Config Injection Guard (#427.4)
+Per #925 operating principle 1: "Quality is a hard floor; cost is the optimization variable. Never trade a HIGH_CONSENSUS finding for cost." This sprint ships INFRASTRUCTURE for quality-floor-respecting tier decisions. The drift gate (FR-4) is the mechanism: changes to `workload_tier_map` are gated on empirical evidence, which means the gate refuses to let cost arguments override quality.
 
-**Problem**: SHELL-002 documents curl config files for API key protection but doesn't warn about CR/LF injection in key values.
+### NFR-Determinism-1: Roll-up determinism
 
-**Affected curl config sites** (Flatline-identified):
-- `lib-curl-fallback.sh` lines 211-215
-- `constructs-auth.sh` lines 156-159
-- `constructs-browse.sh` lines 117-120, 179-182
+Given an identical MODELINV log and identical `model-config.yaml`, the roll-up output must be byte-identical across runs (modulo timestamp banner). No floating-point nondeterminism in cost or rate calculations — use the same `round(..., 4)` discipline as `aggregate_substrate_health`.
 
-**Fix**:
-- Add `write_curl_auth_config()` helper to `lib-security.sh`
-- Returns path to config file (enforces `mktemp` + `chmod 600` centrally)
-- Validates key contents: rejects `\r`, `\n`, `\0`, `\` (backslash); escapes `"` in curl config output
-- Uses `printf` not `echo` for config file writing
-- Migrate all existing curl config creation sites to use the new helper
-- Document pattern in SHELL-002 section of cross-platform protocol
+### NFR-Compat-1: Existing dispatch unchanged
 
-**Acceptance criteria**:
-- Keys containing CR/LF/null/backslash are rejected with clear error message
-- Keys with quotes are properly escaped in curl config output
-- Valid keys (including base64 characters `+`, `/`, `=`) write correct curl config
-- All existing curl config sites (3 files, 4 locations) migrated to `write_curl_auth_config()`
-- CI grep check for raw `printf.*Authorization.*Bearer` patterns prevents regression
-- BATS test covers injection vectors and valid key edge cases
+Per AC: "Zero regression: existing model dispatch unchanged in behavior (the map is *informational* this sprint — Phase B is when skills start consuming it)". Skills do not read `workload_tier_map`. The map exists in config for human readers and for the drift gate.
 
-## 5. Technical & Non-Functional
+### Technical stack alignment
 
-- **System Zone authorization**: All target files are in `.claude/scripts/` and `.claude/skills/` (System Zone). These are framework-internal fixes to the review pipeline itself, requiring authorized System Zone writes for this cycle. Safety hooks (`team-role-guard-write.sh`) must be accounted for in Agent Teams mode.
-- All fixes must include BATS tests (Shell Tests CI now functional after #434)
-- TypeScript changes (FR-2) must rebuild dist/ and pass existing tests
-- No new runtime dependencies
-- Cross-platform: all changes must work on macOS (Darwin) and Linux (Ubuntu CI)
-- Pre-existing BATS test failures (271): New tests should be runnable in isolation (`bats tests/unit/<specific-file>.bats`) to avoid interference
-- FR-4 must be implemented before FR-1 (both modify `lib-curl-fallback.sh` in adjacent code paths)
-- Integration test: A single BATS test should exercise FR-1 (verdict normalization) + FR-4 (error surfacing) + FR-6 (curl config guard) in a single review pipeline pass
+- **Bash** for the CLI (`tools/model-economy-roll-up.sh`) — consistent with other tools in `tools/` and with `loa_cheval.health` shim
+- **Python (optional)** for the heavy aggregation if bash JSONL parsing becomes unwieldy — Python is already in tree for `loa_cheval`; precedent set
+- **jq** for envelope parsing and JSON output — already a hard dep
+- **YAML for config** — `workload_tier_map` lives in `.loa.config.yaml` per #925; `yq` v4 already a hard dep
+- **GitHub Actions** for the drift gate — same workflow style as cycle-108 baseline-pin gate
+- **No new top-level deps** — everything is already in tree
 
-## 6. Scope
+---
 
-### In scope
-- FR-1 through FR-6 as described above
-- Migration of existing ad-hoc implementations to centralized helpers (FR-5, FR-6)
+## 6. Scope & Prioritization
 
-### Out of scope
-- Deployment platform awareness for `/bug` triage (#426 enhancement suggestion) — future cycle
-- `.env` file sourcing for API keys — intentional security decision (SKP-003)
-- Shell Tests 271 pre-existing test failures — separate tech debt issue
-- Model-invoke path error surfacing (`call_api_via_model_invoke()`) — future cycle
-- Full YAML parser replacement for config.ts — the regex fix is sufficient for the reported bug
+### In scope (this cycle / Phase A)
+
+- FR-1 through FR-5 as listed above
+- 5 ACs as written in #925 issue body verbatim (replicated below for traceability)
+
+### Out of scope (explicit)
+
+| Out of scope | Reason | Where it lives |
+|---|---|---|
+| Skills *consume* the `workload_tier_map` | Phase B | Separate future cycle |
+| Auto-demotion / auto-promotion proposals | Phase C | Separate future cycle(s) |
+| Cost dashboards / external observability | Explicit out-of-scope per #925 | Not planned |
+| Per-cycle cost summaries (e.g., "cycle-110 spent $X total") | Could be added but isn't a deliverable here | Possible Phase A.1 polish |
+| #919 model-tier economization (the *proposal-side* counterpart) | Already merged | n/a |
+| Cleaning up the pre-existing ledger drift (cycle-109/110/111 ledger inconsistency) | Out of band; tangential to model-economy | Separate operator-led cleanup |
+
+> Source: #925 body, "Out of scope" section (replicated verbatim)
+
+### Acceptance Criteria (verbatim from #925)
+
+- [ ] `tools/model-economy-roll-up.sh` runs against a real `.run/model-invoke.jsonl` and emits well-formed tabular output (text + JSON modes)
+- [ ] `/loa status --economy` displays the 30d roll-up without requiring extra args
+- [ ] The seeded `workload_tier_map` covers every skill that currently dispatches a model (audit by `grep "model-adapter\|cheval" .claude/skills/`)
+- [ ] At least one calibration from memory is pinned in the map with a reference (e.g. `# Tier-Change-Evidence: feedback_advisor_benchmark.md — executor 6× cheaper but 1 HC missed on PR #885 A/B`)
+- [ ] Drift gate is wired into CI and rejects a synthetic PR that edits the map without a `Tier-Change-Evidence:` trailer
+- [ ] Operator runbook reviewed via /review-sprint + /audit-sprint
+- [ ] Zero regression: existing model dispatch unchanged in behavior (the map is *informational* this sprint — Phase B is when skills start consuming it)
+
+---
 
 ## 7. Risks & Dependencies
 
-| Risk | Mitigation |
-|------|------------|
-| PR #431 conflicts with FR-3 | Close #431, implement fresh from this PRD |
-| TypeScript rebuild for FR-2 may produce merge conflicts with concurrent TS PRs | Merge quickly after building; verify deterministic build output |
-| `GOOGLE_API_KEY` vs `GEMINI_API_KEY` naming inconsistency | **Resolved**: `GOOGLE_API_KEY` is canonical (per cheval.py, google_adapter.py); `GEMINI_API_KEY` accepted as alias with deprecation warning |
-| Curl injection guard may break existing key formats | Use allowlist for known-safe characters; reject only definite injection vectors |
-| FR-1 + FR-4 touch adjacent code in `lib-curl-fallback.sh` | Implement FR-4 first, FR-1 second; shared integration test verifies no interaction bugs |
-| All FRs require System Zone writes | Framework-internal fixes authorized for cycle-048; safety hooks accounted for |
-| 271 pre-existing BATS failures may mask new test results | Run new tests in isolation first, then verify in full suite |
+### Risks
 
-## 8. Issue References
+| ID | Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|---|
+| R-1 | MODELINV envelopes are missing the `skill` / `phase` attribution field on older log lines | medium | medium | FR-1 conditional EARS: bucket missing-attribution envelopes under `(unknown)` rather than skip. Cost is conserved even when bucket attribution is partial. |
+| R-2 | `cost_input` / `cost_output` per model in `model-config.yaml` is stale or wrong for older models | medium | low | Roll-up footer surfaces the model→cost table used in the run with the version pin of `model-config.yaml` for transparency. Operator can re-run with `--cost-snapshot <ref>` to use a historical version. |
+| R-3 | The drift gate triggers false positives on harmless reformatting of `.loa.config.yaml` | medium | low | Drift gate scopes detection to changes WITHIN the `workload_tier_map` YAML section (using yq path-aware diff), not the whole file. Same pattern as cycle-108 baseline-pin gate. |
+| R-4 | Operator forgets to update `workload_tier_map` when adding a new skill, leaving the map non-exhaustive | low | low | Defer to Phase B — that's where the map becomes load-bearing. Phase A's drift gate is informational. |
+| R-5 | Per #925 operating principle 5: "Substrate-health is upstream of tier selection." If the substrate is degraded during the data-collection window, the roll-up surfaces a misleading cost-per-clean-output (because the "clean" denominator is suppressed). | medium | medium | Roll-up explicitly surfaces `substrate_health_window_summary` in the footer — operator can see if the window included a substrate degradation event and reason about confounded data. |
+| R-6 | Pre-existing `final_model` bucketing leakage (deferred from #900 fix) confounds `(skill, model)` attribution when filtering by model | low | medium | NOTES.md Decision Log already documents this. Roll-up tool inherits the same scope split — uses post-`models_requested` attribution where appropriate, notes the leakage in the runbook. |
 
-| Issue | Status | Disposition |
-|-------|--------|-------------|
-| #421 | Closed | Fixed by #434 (gpt-5.3-codex default) |
-| #425 | Open | FR-2 |
-| #426 | Open | FR-4 (error surfacing); .env sourcing is by-design; deployment context is future |
-| #427 | Open | FR-1 (verdict), FR-5 (timeout), FR-6 (curl guard); finding 3 fixed by #434 |
-| #430 | Open | FR-3 (supersedes PR #431) |
+### Dependencies
 
-## 9. Flatline Review Log
+| Dep | Status | Notes |
+|---|---|---|
+| #900 substrate-health primary-failure visibility | **Closed today** ([PR #926](https://github.com/0xHoneyJar/loa/pull/926), `602568c5`) | Was a soft-dep; closing removes the accuracy caveat from this cycle's data |
+| MODELINV v1.3 envelope schema | Shipped (cycle-109) | Includes `tokens_input` / `tokens_output` / `verdict_quality` / `chain_health` — everything the roll-up needs |
+| `.loa.config.yaml` `model-config` section with `cost_input` / `cost_output` per model | Already in tree | Verify in SDD phase that all dispatched models have cost entries |
+| `lib/log-redactor` (cycle-099 T1.13) | Already enforced on MODELINV writes | NFR-Sec-1 inherits this |
+| cycle-108 baseline-pin drift gate workflow | Shipped (PR #867) | Provides the architectural template for FR-4 |
 
-**Phase**: PRD review (cycle-048 Phase 2)
-**Reviewers**: Opus (reviewer) + Opus (skeptic)
-**Findings**: 16 reviewer + 16 skeptic = 32 total
-**HIGH_CONSENSUS**: 8 findings integrated (FR-1 scope expansion, FR-2 context clarification, FR-3 greenfield reframe, FR-4 redaction + non-JSON handling, FR-5 migration scope, FR-6 migration checklist, System Zone authorization, implementation sequencing)
-**DISPUTED**: 1 (GOOGLE_API_KEY resolution — resolved by checking both, integrated)
-**PRAISE**: 2 (scope discipline, centralization approach)
-**BLOCKERS**: 0
+### Unlocks (this cycle enables future work)
+
+- **#876 real-data benchmark operator trigger gate** — the benchmark engine needs the roll-up infrastructure to compare A/B runs against. After this cycle, #876 can be activated with the roll-up as its data foundation.
+- **Phase B** — straightforward once the map exists and the drift gate is in place; skills start consuming `workload_tier_map`
+- **Phase C** — needs N cycles of operational data from this sprint's roll-up
+
+---
+
+## 8. Operating Principles (codified for runbook)
+
+Per #925 body, these five principles govern future tier decisions and are the source-of-truth for the runbook (FR-5 §5):
+
+1. **Quality is a hard floor; cost is the optimization variable.** Never trade a HIGH_CONSENSUS finding for cost. Memory's "executor unsafe for BB review" (6× cheaper, 1 HC missed, 60% fewer findings) is the canonical example.
+2. **Different work has different quality floors.** `/implement` can tolerate lower tier than `/audit-sprint`. Codify per-skill, not globally.
+3. **Empirical beats theoretical.** Don't move tiers based on intuition. Require N HEALTHY verdict_quality runs before any demotion proposal.
+4. **One-way doors require operator approval.** Demotions to cheaper tier are easy to slip into and hard to detect regressing-out-of. Promotions are safer defaults.
+5. **Substrate-health is upstream of tier selection.** When the substrate is degraded (chain-exhausted, malformed_response, voice-dropped), no model choice produces a clean verdict. Fix substrate first, then optimize within healthy substrate.
+
+> Source: #925 body, "Operating principles" section (verbatim)
+
+---
+
+## 9. Sources & Traceability
+
+- **Issue**: [#925](https://github.com/0xHoneyJar/loa/issues/925) — primary source, body cited verbatim throughout
+- **Memory**: `feedback_advisor_benchmark.md` (executor unsafe for BB review), `project_next_priorities_2026_05_13.md` (cycle-108 close, top priorities), `feedback_substrate_validation_close_shape.md` (substrate-validation shape pattern)
+- **Recent PRs**: #923 (KF-010 close, deriveTimeoutMs reasoning-class predicate), #924 (KF-010 empirical confirmation), [#926](https://github.com/0xHoneyJar/loa/pull/926) (#900 close, substrate-health primary-failure visibility)
+- **Reality grounding (codebase)**: `.claude/adapters/loa_cheval/health.py` (MODELINV envelope aggregation pattern this cycle extends), `.run/model-invoke.jsonl` (raw telemetry source), `.loa.config.yaml::flatline_protocol` (existing model + budget config pattern this cycle echoes)
+- **Architectural template**: cycle-108 PR #867 baseline-pin drift gate (template for FR-4 drift gate)
+
+### Discovery shortcut justification
+
+The /plan-and-analyze skill's default 7-phase interview was skipped because:
+
+1. #925 body is proposal-grade — already contains problem statement, deliverables, ACs, dependencies, out-of-scope, operating principles
+2. The operator explicitly authorized the shortcut in this session's hand-off
+3. Brownfield grounding is already fresh: cycle-109 substrate-hardening reality at `grimoires/loa/cycles/cycle-109-substrate-hardening/sdd.md` documents the MODELINV envelope shape this cycle consumes; that work was completed by the same operator within the last 2 weeks
+4. Phase 0 confirmation gate (this PRD) is the operator's review surface — interview compression at the front does not lose the operator-review gate at the back
+
+The compressed-interview decision is captured in `grimoires/loa/NOTES.md` Decision Log (2026-05-17 entry) per cycle hygiene.
