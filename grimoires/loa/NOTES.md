@@ -71,9 +71,36 @@
     belt-scoped gate (drift_resolution: code).
   - Also resolved an S2-T4 open question: `envio codegen` **does** support `--config`
     (v3.0.0-alpha.14) — no copy-to-`config.yaml` needed at deploy.
-- Next: **S2-T3/T4/T5** — operator-paired (local dev run — 3 handler-emission queries;
-  belt Railway service + belt Postgres deploy; cold sync + on-chain loan reconciliation).
-  Then **S3** (L4/L5/L6 — gateway, observability, hardening, staged handback).
+- **S2-T3 → DISS-003: Envio cannot sync Berachain via EITHER data source** (2026-05-20,
+  operator-paired). The local dev run surfaced the cycle's pivotal finding. Root cause,
+  proven end-to-end after clearing several local-debug layers:
+  - **RPC sync is broken for Berachain.** With `generated/` re-codegen'd against a
+    *reachable* RPC (`rpc.berachain-apis.com`) and a fresh DB, the indexer reaches the
+    endpoint, pulls blocks, and **fails parsing every one**:
+    `[rescript-rest] Failed parsing response at ["data"]["result"]["totalDifficulty"].
+    Reason: Expected string | null, received undefined`. Envio v3.0.0-alpha.14's RPC
+    block parser **requires `totalDifficulty`**; Berachain (post-merge PoS) omits it.
+    eRPC is a transparent JSON-RPC proxy — belt→eRPC→public-RPC carries the SAME omission,
+    so eRPC does NOT fix this unless it can inject `totalDifficulty` (unverified; not a
+    default eRPC feature).
+  - **HyperSync now requires a token.** Switching the source to HyperSync crashes at init:
+    `An API token is required for using HyperSync as a data-source. Set ENVIO_API_TOKEN…
+    get a free API token at https://envio.dev/app/api-tokens`. **This is almost certainly
+    the original "fire"** — the indexer used HyperSync, HyperSync made the token mandatory,
+    `/backing` broke (PRD G1).
+  - **Architecture implication**: r4's premise (belt indexes Berachain over JSON-RPC
+    through eRPC) is **not viable as-is** — Envio's RPC source can't parse Berachain. The
+    likely simplest fix to PRD G1 is **HyperSync + a free `ENVIO_API_TOKEN`** — which
+    reframes eRPC's role (the whole eRPC pivot may have been solving an avoidable problem).
+  - **Local-debug layers cleared en route** (all secondary to the above): codegen embeds
+    the data source — `generated/` had a stale unreachable `erpc.railway.internal` baked
+    in, so config edits did nothing until re-codegen (this masked the real error as
+    `knownHeight: 0`); the Ink TUI crashes non-TTY (`TUI_OFF=true`); port-9898 lingers
+    across runs; `docker-credential-desktop` missing from envio's PATH (Docker.app bin).
+  - **S2-T2's build gate (codegen + belt typecheck + CI) stands** — the verified S2
+    checkpoint. S2-T3/T4/T5 blocked pending an architecture decision.
+- Next: **operator architecture decision** (HyperSync+token / eRPC-normalize / Envio
+  version / rethink) — DISS-003 invalidates r4's RPC premise. Then S2-T3+ → S3.
 
 ## Prior Focus (superseded by r4 re-sprint)
 - indexer-belt-rebuild Sprint 1 COMPLETE (2026-05-20, `/run sprint-1`) —
