@@ -10,6 +10,20 @@
   indexer itself.
 - Phase 8 (legacy deprecation) deliberately skipped — README/SCALE/DEPLOYMENT_GUIDE
   are active operational docs, not superseded. See `trajectory-audit.md`.
+- Sprint 1 (indexer-belt-rebuild · `/run sprint-1` · 2026-05-20): authored
+  `config.mibera.yaml` (S1-T1) + `scripts/verify-belt-config.js` + `test/verify-belt-config.test.ts`
+  (S1-T2). Belt config is a verbatim extract of `config.yaml`'s 2 Mibera contracts; the
+  verify gate mechanically enforces field_selection/address/start_block fidelity (SDD
+  §5.3). AC-2 + AC-11 met; 9/9 tests pass. No `src/` changes. beads bd-3eb/bd-11o closed.
+- Discovered, pre-existing, NOT introduced by Sprint 1 (logged, not fixed — Karpathy
+  surgical-changes; the full `codegen + tsc` build gate is Sprint 2 / S2-T3):
+  bd-1kg — `src/handlers/sf-vaults.ts` fails `tsc --noEmit` (~7 errors; surfaced when
+  `node_modules` was hydrated to the lockfile — stale `typescript 5.2.2` had masked them;
+  `sf-vaults` is an archived contract; `generated/` is stale (Feb 15) so S2-T3 codegen
+  may resolve). bd-3nb — no `vitest.config` → `pnpm test` sweeps the whole repo (296
+  framework files fail to collect); `test/fatbera-core.test.ts` imports removed `chai`.
+- `node_modules` was stale (pre-vitest mocha/chai era) — hydrated via
+  `pnpm install --frozen-lockfile`; `package.json` + `pnpm-lock.yaml` unchanged.
 
 ## /ride Results (2026-05-19)
 - Target: thj-envio (freeside-sonar) — THJ Envio HyperIndex V3 indexer
