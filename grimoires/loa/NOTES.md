@@ -14,8 +14,11 @@
   4 sprints, global ids 168–171; `active_cycle` set to `indexer-belt-rebuild`. Note:
   the completed belt-config Sprint 1 predates ledger registration and is not
   retroactively listed.
-- Next: **S0** — the eRPC calibration spike (operator-paired, half-day; measure the
-  free-RPC + eRPC cold-sync rate, no preset pass/fail).
+- S0 COMPLETE (2026-05-20) — free public Berachain RPC + eRPC cold-sync measured
+  (~39k blk/s cold, ~192k warm, 0 rate-limiting; encouraging for H1). S1-T1 COMPLETE —
+  `erpc.yaml` authored + eRPC-v0.0.64-validated.
+- Next: **S1-T2/T3/T4** — operator-paired Railway provisioning (dedicated eRPC service
+  + cache Postgres, sizing, smoke-verify). Then S2 (re-point the Mibera belt to eRPC).
 
 ## Prior Focus (superseded by r4 re-sprint)
 - indexer-belt-rebuild Sprint 1 COMPLETE (2026-05-20, `/run sprint-1`) —
@@ -64,6 +67,17 @@
   belt entrypoint relocated to `src/belts/mibera/EventHandlers.mibera.ts`;
   `config.mibera.yaml` gains top-level `handlers: src/belts/mibera`. Factory-model unit
   is a per-belt directory `src/belts/<belt>/`. Autoload glob scope verified empirically.
+- S0 (re-sprint, 2026-05-20): eRPC calibration spike — 4 public Berachain 80094 RPC
+  endpoints verified (anonymous, no keys); cold-sync measured ~39k blk/s cold /
+  ~192k warm (4.9x cache), 0 rate-limiting; extrapolated full cold-sync
+  minutes-to-low-hours. H1 strongly encouraging. See `grimoires/loa/spikes/s0-erpc-calibration.md`.
+- S1 (re-sprint eRPC L2, `/run sprint-1`, 2026-05-20): **S1-T1 done** — `erpc.yaml`
+  authored (4 Berachain public upstreams + postgresql cache + reorg-safe finalized/
+  unfinalized policies + hedge/retry/timeout failsafe; multi-chain-additive; zero inline
+  secrets; schema-validated vs eRPC v0.0.64). **S1-T2/T3/T4 are operator-paired** Railway
+  infra (dedicated eRPC service + cache Postgres, sizing, deployed-URL smoke-verify) —
+  designated `(operator-paired)` in `sprint.md`; the run does S1-T1 then hands back. S1
+  is not COMPLETE until the operator does T2-T4.
 
 ## /ride Results (2026-05-19)
 - Target: thj-envio (freeside-sonar) — THJ Envio HyperIndex V3 indexer
