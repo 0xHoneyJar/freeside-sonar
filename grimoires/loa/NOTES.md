@@ -22,8 +22,26 @@
   dissents clean. `COMPLETED` marker written (scoped to the run's S1-T1 autonomous scope).
   Run JACKED_OUT — hands back. Ledger: S0→completed, **S1 (169)→in_progress** (NOT
   completed — T2-T4 pending).
-- Next: **S1-T2/T3/T4** — operator-paired Railway provisioning (dedicated eRPC service
-  + cache Postgres, sizing, smoke-verify). Then S2 (re-point the Mibera belt to eRPC).
+- **S1 COMPLETE — eRPC L2 substrate live on Railway** (2026-05-20, operator-paired):
+  - S1-T2 — `freeside-sonar` Railway project (the honey jar ws, id `e240cdf0`) created;
+    `Postgres` cache service + `erpc` service deployed. `erpc` builds from `Dockerfile.erpc`
+    (digest-pinned eRPC v0.0.64 + baked-in `erpc.yaml`); `ERPC_DATABASE_URL` →
+    `${{Postgres.DATABASE_URL}}` (private ref, no inline secret).
+  - S1-T3 — cache Postgres = Railway default size ("start small" per OD-2 / R-4).
+  - S1-T4 — smoke-verified: eRPC answers `80094` JSON-RPC (chainId `0x138de`, blockNumber,
+    getLogs 9270 logs); a repeated finalized getLogs is **served from cache** (log-confirmed
+    — `ttl: 0` = cache-forever; audit Concern-1 / the `ttl:0` assumption RETIRED); failover
+    observed (publicnode 503'd, eRPC served via the other 3; all 4 upstreams synced).
+  - **Deploy findings folded into `erpc.yaml`**: eRPC needs `httpHostV6: "::"` — Railway
+    routes to containers over IPv6, IPv4-only bind → 502 (S0 missed it: local Docker is
+    IPv4). `logLevel` warn→info for the verification window — REVERT to warn at cycle
+    steady-state. The eRPC image EXPOSEs 3 ports (4000/4001/6060) → a Railway public domain
+    needs an explicit `targetPort: 4000` (runbook note; private networking is unaffected).
+  - eRPC internal address for S2: `http://erpc.railway.internal:4000/main/evm/80094`.
+  - Residual: temp public smoke-test domain `erpc-production-0437.up.railway.app` — removal
+    staged via config patch; if it lingers, remove in Railway dashboard (Settings→Networking).
+- Next: **S2** — re-point `config.mibera.yaml` data source to the eRPC internal URL, then
+  the operator-paired belt deploy + on-chain loan reconciliation.
 
 ## Prior Focus (superseded by r4 re-sprint)
 - indexer-belt-rebuild Sprint 1 COMPLETE (2026-05-20, `/run sprint-1`) —

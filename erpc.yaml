@@ -17,11 +17,13 @@
 #
 # Schema validated against eRPC v0.0.64 (S0 calibration spike, 2026-05-20).
 
-logLevel: warn
+logLevel: info            # S1-T2/T4 verification window — revert to warn for steady state
 
 server:
   httpHostV4: "0.0.0.0"
-  httpPort: 4000          # S1-T2 maps Railway's assigned port to this container port
+  httpHostV6: "::"        # Railway's edge + private networking reach the container over
+                          # IPv6 — binding IPv4-only yields a 502 (S1-T2 deploy finding).
+  httpPort: 4000
 
 # ── L2 cache — persistent, reorg-safe ────────────────────────────────────────────────
 # eRPC caches finalized blockchain history so re-syncs (a belt redeploy, a DB wipe)

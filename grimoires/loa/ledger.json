@@ -1371,7 +1371,7 @@
           "local_id": 1,
           "global_id": 169,
           "label": "S1 — Build the eRPC L2 Substrate",
-          "status": "in_progress"
+          "status": "completed"
         },
         {
           "local_id": 2,
