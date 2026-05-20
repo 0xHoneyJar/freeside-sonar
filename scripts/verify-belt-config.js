@@ -72,11 +72,16 @@ function topLevelContractsSection(lines) {
 }
 
 /**
- * Extract a contract *definition* block (name, handler, events, field_selection)
- * from the top-level `contracts:` list.
+ * Extract a contract *definition* block from the top-level `contracts:` list,
+ * normalized for comparison: comments, blank lines, and the `handler:` line are
+ * stripped. The `handler:` line is excluded by design — a belt config points it
+ * at a belt-scoped registration entrypoint (e.g. src/EventHandlers.mibera.ts)
+ * while config.yaml uses the monolith barrel src/EventHandlers.ts. SDD §5.3
+ * scopes this gate to field_selection / address / start_block fidelity, not
+ * handler-path identity.
  * @param {string} text  full YAML file text
  * @param {string} contractName
- * @returns {string | null}  normalized block, or null if absent
+ * @returns {string | null}  normalized block (name + events + field_selection), or null
  */
 export function extractContractDefinition(text, contractName) {
   const lines = text.split('\n');
@@ -98,7 +103,9 @@ export function extractContractDefinition(text, contractName) {
       break;
     }
   }
-  return normalizeBlock(lines.slice(blockStart, blockEnd));
+  // Exclude the `handler:` line — see the function doc (SDD §5.3 scope).
+  const block = lines.slice(blockStart, blockEnd).filter((l) => !/^\s+handler:\s/.test(l));
+  return normalizeBlock(block);
 }
 
 /**

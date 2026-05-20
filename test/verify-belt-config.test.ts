@@ -78,6 +78,23 @@ describe("verify-belt-config", () => {
     expect(result.mismatches.join("\n")).toMatch(/address/);
   });
 
+  it("tolerates a differing handler: line (SDD §5.3 — field_selection fidelity, not handler path)", () => {
+    // config.mibera.yaml points handler: at the belt entrypoint
+    // (src/EventHandlers.mibera.ts); config.yaml uses the monolith barrel. They
+    // differ by design (DISS-001 fix) — the gate must not flag that difference.
+    const rehandlered = beltText.replace(
+      /handler: \S+/g,
+      "handler: src/EventHandlers.someother.ts",
+    );
+    expect(rehandlered).not.toBe(beltText);
+    const result = verifyBeltConfig({
+      beltConfigText: rehandlered,
+      monolithConfigText: monoText,
+    });
+    expect(result.mismatches).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
   it("fails when a belt contract is missing entirely", () => {
     const result = verifyBeltConfig({
       beltConfigText: "name: empty\n",

@@ -24,6 +24,19 @@
   framework files fail to collect); `test/fatbera-core.test.ts` imports removed `chai`.
 - `node_modules` was stale (pre-vitest mocha/chai era) — hydrated via
   `pnpm install --frozen-lockfile`; `package.json` + `pnpm-lock.yaml` unchanged.
+- Sprint 1 review (2026-05-20) — BLOCKING cross-model finding DISS-001 (bd-12q): a
+  belt-scoped `config.mibera.yaml` cannot build against the monolith barrel
+  `src/EventHandlers.ts` (scoped `envio codegen` → `generated/` missing 39 contracts →
+  their handler modules fail to resolve). SDD §3.2 "handlers reused as-is, zero code
+  changes" + `sprint.md:22` "no handler changes anywhere" are incompatible with a
+  scoped config + monolith entrypoint — an SDD-level gap, not an implementation defect.
+- **Decision (operator, 2026-05-20, `/run sprint-1`)**: amend SDD §3.2 / `sprint.md:22`
+  in effect — per-belt handler **registration entrypoints** are permitted as additive
+  scaffolding (handler *logic* unchanged). Deployment #1 adds `src/EventHandlers.mibera.ts`;
+  HoneyJar/Purupuru/Sprawl belts will each get their own. config.mibera.yaml's `handler:`
+  fields repoint to it; `verify-belt-config` refined to compare field_selection/address/
+  start_block excluding the `handler:` line (SDD §5.3's actual scope). Formal SDD
+  reconciliation deferred (drift_resolution: code).
 
 ## /ride Results (2026-05-19)
 - Target: thj-envio (freeside-sonar) — THJ Envio HyperIndex V3 indexer
