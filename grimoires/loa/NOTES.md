@@ -1,7 +1,10 @@
 # Session Notes
 
 ## Current Focus
-- /ride codebase analysis complete (2026-05-19)
+- indexer-belt-rebuild **Sprint 1 COMPLETE** (2026-05-20, `/run sprint-1`) —
+  `config.mibera.yaml` + `verify-belt-config` + belt entrypoint; implement→review→audit
+  all APPROVED (commits 1052125, 8cb08ce, 9a97c1a). Next: **Sprint 2** (Deploy &
+  Handback) — operator-paired, not autonomous.
 
 ## Decisions
 - Installed Loa framework with full configuration matching midi-interface setup
@@ -65,4 +68,8 @@
 
 ## Blockers
 
-None.
+- **bd-1ra** — no project git remote. `git remote -v` shows only `loa-upstream →
+  0xHoneyJar/loa.git` (the framework repo). The Sprint 1 draft PR could not be created;
+  work is committed locally on `indexer-belt-rebuild`. To publish: add an `origin`
+  remote for `0xHoneyJar/thj-envio`, then `git push -u origin indexer-belt-rebuild`
+  and open the PR. (Not a Sprint 1 defect — repo setup.)

@@ -25,7 +25,7 @@ No handler or schema code changes anywhere.
 
 ## Sprint 1 — Belt Config (code)
 
-### S1-T1 — Author `config.mibera.yaml` (PRD FR-1, SDD §3.1 + §5)
+### ✓ S1-T1 — Author `config.mibera.yaml` (PRD FR-1, SDD §3.1 + §5)
 - **Do**: Create `config.mibera.yaml` — a HyperIndex config, network Berachain `80094`,
   data source defaulting to `berachain.hypersync.xyz` HyperSync (Sprint 2 / S2-T1 confirms
   it). Two contracts, **full addresses**:
@@ -42,7 +42,7 @@ No handler or schema code changes anywhere.
   and `field_selection` are byte-identical to `config.yaml`.
 - **Deps**: none. **Size**: M.
 
-### S1-T2 — Author `scripts/verify-belt-config` + test (SDD §5.3)
+### ✓ S1-T2 — Author `scripts/verify-belt-config` + test (SDD §5.3)
 - **Do**: Build `scripts/verify-belt-config` — parses `config.mibera.yaml` + `config.yaml`
   and asserts, per event of both belt contracts, that `field_selection`, addresses, and
   start_blocks are byte-identical; exits non-zero on any mismatch. **Test-first**: write a
