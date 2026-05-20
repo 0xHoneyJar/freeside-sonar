@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+# Mibera belt — Deployment #1 (the fire fix).
+#
+# A HyperIndex config scoped to the two Mibera contracts on Berachain. Event ABIs,
+# per-event `field_selection`, addresses and start_blocks are extracted VERBATIM
+# from config.yaml; scripts/verify-belt-config.js mechanically enforces that
+# fidelity (SDD §5.3, PRD FR-1, AC-2 / AC-11). The top-level `handlers:` key scopes
+# Envio's handler autoload (HandlerLoader.autoLoadFromSrcHandlers globs that
+# directory) to src/belts/mibera/ — whose only file is the belt registration
+# entrypoint — so a scoped `envio codegen` build never imports the other contracts'
+# handler modules (review finding DISS-001). Shared src/handlers logic +
+# schema.graphql are reused unchanged — see grimoires/loa/sdd.md §2-§3.
+name: mibera-belt
+# Scope Envio's handler autoload (HandlerLoader.autoLoadFromSrcHandlers globs this
+# directory) to the belt entrypoint only — see the header note + review DISS-001.
+handlers: src/belts/mibera
+contracts:
+  # MiberaLiquidBacking - Liquid backing system (loans, RFV, marketplace for defaulted NFTs)
+  - name: MiberaLiquidBacking
+    handler: src/belts/mibera/EventHandlers.mibera.ts
+    events:
+      # Loan lifecycle events
+      - event: LoanReceived(uint256 loanId, uint256[] ids, uint256 amount, uint256 expiry)
+        field_selection:
+          transaction_fields:
+            - hash
+            - from
+      - event: BackingLoanPayedBack(uint256 loanId, uint256 newTotalBacking)
+        field_selection:
+          transaction_fields:
+            - hash
+      - event: BackingLoanExpired(uint256 loanId, uint256 newTotalBacking)
+        field_selection:
+          transaction_fields:
+            - hash
+      - event: ItemLoaned(uint256 loanId, uint256 itemId, uint256 expiry)
+        field_selection:
+          transaction_fields:
+            - hash
+            - from
+      - event: LoanItemSentBack(uint256 loanId, uint256 newTotalBacking)
+        field_selection:
+          transaction_fields:
+            - hash
+      - event: ItemLoanExpired(uint256 loanId, uint256 newTotalBacking)
+        field_selection:
+          transaction_fields:
+            - hash
+      # Marketplace events
+      - event: ItemPurchased(uint256 itemId, uint256 newTotalBacking)
+        field_selection:
+          transaction_fields:
+            - hash
+            - from
+      - event: ItemRedeemed(uint256 itemId, uint256 newTotalBacking)
+        field_selection:
+          transaction_fields:
+            - hash
+            - from
+      - event: RFVChanged(uint256 indexed newRFV)
+        field_selection:
+          transaction_fields:
+            - hash
+  # MiberaCollection - Transfer tracking for mint activity
+  - name: MiberaCollection
+    handler: src/belts/mibera/EventHandlers.mibera.ts
+    events:
+      - event: Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
+        field_selection:
+          transaction_fields:
+            - hash
+            - value
+chains:
+  # Berachain Mainnet (DO NOT CHANGE THIS ID)
+  - id: 80094
+    # Earliest belt contract (MiberaCollection @ 3837808); per-contract
+    # start_blocks below override this floor.
+    start_block: 3837808
+    # Data source — the eRPC L2 substrate (SDD r4 §3 / §4.1). r4 retires the
+    # Sprint-1 HyperSync source; the belt indexes Berachain over JSON-RPC through
+    # the shared eRPC proxy at its private Railway address. `for: sync` makes eRPC
+    # the primary data source — historical backfill AND realtime — NOT a HyperSync
+    # fallback (Envio defaults a bare rpc to `fallback` for HyperSync-supported
+    # chains, and Berachain is one). The URL is eRPC's internal Railway domain +
+    # its JSON-RPC route /<project>/<arch>/<chainId>.
+    # Envio v3.0.0-alpha.14's schema field is `rpc` — SDD §4.1 / sprint.md S2-T1
+    # name it `rpc_config`, which does not exist in the installed schema; see the
+    # S2-T1 implementation report for the naming-drift finding.
+    rpc:
+      url: http://erpc.railway.internal:4000/main/evm/80094
+      for: sync
+    contracts:
+      # Mibera Liquid Backing - Loans, RFV, and marketplace
+      - name: MiberaLiquidBacking
+        address:
+          - 0xaa04F13994A7fCd86F3BbbF4054d239b88F2744d # Mibera Liquid Backing
+        start_block: 3971122 # MiberaLiquidBacking deployment
+      # Mibera Collection - NFT transfer tracking for mint activity
+      - name: MiberaCollection
+        address:
+          - 0x6666397dfe9a8c469bf65dc744cb1c733416c420 # Mibera Collection
+        start_block: 3837808 # MiberaCollection deployment

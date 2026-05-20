@@ -1,0 +1,99 @@
+# erpc.yaml — the L2 eRPC substrate for the freeside-sonar belt factory.
+#
+# eRPC is ONE shared deployment (SDD r4 §3.1) — every belt's HyperIndex points its
+# `rpc_config` at this proxy. It fronts free public RPC with caching + hedging +
+# failover, turning unreliable free endpoints into a data source reliable enough to
+# index on. Built S1; deployed as a dedicated Railway service S1-T2.
+#
+# Multi-chain-capable, Berachain-wired (SDD §3.2 / OD-4): Deployment #1 declares the
+# Berachain 80094 upstream group only. Adding a chain later (ETH / ARB / Base / OP /
+# Zora — for the HoneyJar / Purupuru / Sprawl belts) is a PURELY ADDITIVE edit: append
+# upstreams + a networks[] entry below. eRPC auto-detects each upstream's chain. No
+# existing entry changes, no restructuring.
+#
+# Secrets: NONE inline (SDD §3.2 / §10.3). The cache-Postgres connection string is a
+# Railway environment variable referenced by name. The 4 Berachain endpoints are
+# anonymous public RPC — no API keys (S0-T1 finding).
+#
+# Schema validated against eRPC v0.0.64 (S0 calibration spike, 2026-05-20).
+
+logLevel: info            # S1-T2/T4 verification window — revert to warn for steady state
+
+server:
+  httpHostV4: "0.0.0.0"
+  httpHostV6: "::"        # Railway's edge + private networking reach the container over
+                          # IPv6 — binding IPv4-only yields a 502 (S1-T2 deploy finding).
+  httpPort: 4000
+
+# ── L2 cache — persistent, reorg-safe ────────────────────────────────────────────────
+# eRPC caches finalized blockchain history so re-syncs (a belt redeploy, a DB wipe)
+# replay from cache at memory speed. S0-T2 measured ~4.9x (getLogs) / ~20x (block fetch)
+# cache-warm speedup. The cache compounds across belts on the same chain (SDD §3.1).
+database:
+  evmJsonRpcCache:
+    connectors:
+      - id: postgres-cache
+        driver: postgresql
+        postgresql:
+          # Railway PostgreSQL — connection string injected as a Railway env var
+          # (wired S1-T2). NEVER inline a credential here (SDD §10.3).
+          connectionUri: ${ERPC_DATABASE_URL}
+          table: erpc_json_rpc_cache
+    policies:
+      # Finalized history is immutable → cache with no expiry (ttl: 0).
+      - network: "*"
+        method: "*"
+        finality: finalized
+        connector: postgres-cache
+        ttl: 0
+      # Chain-tip / unfinalized blocks can reorg → short TTL so a reorg cannot serve
+      # stale data for long.
+      - network: "*"
+        method: "*"
+        finality: unfinalized
+        connector: postgres-cache
+        ttl: 5s
+
+projects:
+  - id: main
+
+    # ── Failsafe: hedged requests + retry + timeout (SDD §3.2) ───────────────────────
+    # Hedge — if the chosen upstream is slow, fire a parallel request to another and
+    # take the first answer. eRPC also tracks each upstream's error-rate / latency and
+    # auto-deprioritizes degrading endpoints — the mechanism that makes a cluster of
+    # free public RPCs reliable enough to index on (S0-T2: 0 rate-limiting observed).
+    networks:
+      - architecture: evm
+        evm:
+          chainId: 80094
+        failsafe:
+          - matchMethod: "*"
+            timeout:
+              duration: 30s
+            retry:
+              maxAttempts: 3
+              delay: 200ms
+            hedge:
+              delay: 1s
+              maxCount: 2
+
+    # ── L1 upstreams — Berachain 80094 public cluster (S0-T1 verified 2026-05-20) ─────
+    # All anonymous / no-API-key / $0. Observed eth_getLogs block-range caps:
+    # berachain-apis 100k · publicnode 50k · berachain.com 10k · drpc 10k.
+    # NOTE (S0-T2): eRPC's own getLogs maxAllowedRange defaults to 30k. The Envio belt
+    # is configured to request getLogs windows <=30k (S2 belt config), or eRPC's range
+    # is raised — tuned + smoke-verified in S1-T4 / S2.
+    upstreams:
+      - id: berachain-apis
+        endpoint: https://rpc.berachain-apis.com
+      - id: berachain-publicnode
+        endpoint: https://berachain-rpc.publicnode.com
+      - id: berachain-official
+        endpoint: https://rpc.berachain.com
+      - id: berachain-drpc
+        endpoint: https://berachain.drpc.org
+
+    # ── Future belts (SDD §3.2 / OD-4) — ADDITIVE ONLY ───────────────────────────────
+    # HoneyJar / Purupuru / Sprawl belts: append their chains' public upstreams here
+    # (Ethereum 1, Arbitrum 42161, Base 8453, Optimism 10, Zora 7777777) plus a matching
+    # networks[] entry above. No existing line changes.
